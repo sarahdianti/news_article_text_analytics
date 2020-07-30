@@ -1,0 +1,672 @@
+---
+title: "1_web_scraping"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#rm(list=ls())
+```
+
+```{r}
+library(rvest)
+library(xml2)
+library(downloader)
+library(dplyr)
+library(tidyverse)
+library(tidytext)
+library(sqldf)
+library(RSQLite)
+library(httr)
+library(textclean)
+library(tm)
+library(stringi)
+library(lubridate)
+```
+
+# SQL DB
+```{r}
+library(tidytext)
+library(sqldf)
+library(RSQLite)
+library(httr)
+library(textclean)
+
+db_con <- dbConnect(SQLite(), dbname="scenario_prep.db")
+```
+
+# Royal Mail Group website
+```{r}
+# Pages
+rmg_page <- (1:74)
+rmg_urls <- list()
+
+for (i in 1:length(rmg_page)){
+  rmg_url <- paste0("https://www.royalmailgroup.com/en/press-centre/press-releases/?tagFilter=&searchTerm=Royal%20Mail&pageNum=", rmg_page[i])
+  rmg_urls[[i]] <- rmg_url
+}
+
+# Articles
+rmg_article_urls <- list()
+for (j in seq_along(rmg_urls)){
+  rmg_article_url <- rmg_urls[[j]] %>%
+    read_html() %>%
+    html_nodes(".btn--arrow") %>%
+    html_attr("href")
+  rmg_article_urls[[j]] <- rmg_article_url
+}
+```
+
+```{r}
+rmg_df <- data.frame()
+for(k in rmg_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0("https://www.royalmailgroup.com/", single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    rmg_df <- rbind(rmg_df, this_df)
+  }
+}
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1754:1774){
+  current_article <- rmg_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".article__header-title") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes(".article__content") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_date <- html_current_article %>%
+    html_nodes(".article__meta-item") %>%
+    html_text()
+    
+  rmg_df$article_title[[m]] <- print(current_title)
+  rmg_df$content[[m]] <- print(current_content)
+  rmg_df$published_date[[m]] <- print(current_date[2])
+  
+}
+
+dbWriteTable(db_con, "raw_rmg", rmg_df, append = T)
+
+rm(rmg_page)
+rm(rmg_url)
+rm(rmg_urls)
+rm(rmg_article_url)
+rm(rmg_article_urls)
+```
+
+
+# BBC website
+```{r}
+# Pages
+bbc_page <- (1:29)
+bbc_urls <- list()
+
+for (i in 1:length(bbc_page)){
+  bbc_url <- paste0("https://www.bbc.co.uk/search?q=royal+mail&page=", bbc_page[i])
+  bbc_urls[[i]] <- bbc_url
+}
+
+# Articles
+bbc_article_urls <- list()
+for (j in seq_along(bbc_urls)){
+  bbc_article_url <- bbc_urls[[j]] %>%
+    read_html() %>%
+    html_nodes(".ett16tt7") %>%
+    html_attr("href")
+  bbc_article_urls[[j]] <- bbc_article_url
+}
+```
+
+```{r}
+bbc_df <- data.frame()
+for(k in bbc_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0(single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    bbc_df <- rbind(bbc_df, this_df)
+  }
+}
+```
+
+```{r}
+bbc_df <- dplyr::filter(bbc_df, grepl("/news/", link))
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:211){
+  current_article <- bbc_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".story-body__h1") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes("p") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- current_content[-c(1:12)]
+  current_content <- current_content[1:(length(current_content)-2)]
+  current_content <- paste(current_content, collapse = " ")
+  
+  
+  current_date <- html_current_article %>%
+    html_nodes(".date--v2") %>%
+    html_text()
+    
+  bbc_df$article_title[[m]] <- print(current_title)
+  bbc_df$content[[m]] <- print(current_content)
+  bbc_df$published_date[[m]] <- print(current_date[1])
+  
+  print(m)
+}
+
+dbWriteTable(db_con, "raw_bbc", bbc_df, append = T)
+
+rm(bbc_page)
+rm(bbc_url)
+rm(bbc_urls)
+rm(bbc_article_url)
+rm(bbc_article_urls)
+```
+
+
+# Courier News website
+```{r}
+# Pages
+cn_page <- (1:6)
+cn_urls <- list()
+
+for (i in 1:length(cn_page)){
+  cn_url <- paste0("http://couriernews.co.uk/page/", cn_page[i], "/?s=royal+mail")
+  cn_urls[[i]] <- cn_url
+}
+
+# Articles
+cn_article_urls <- list()
+for (j in seq_along(cn_urls)){
+  cn_article_url <- cn_urls[[j]] %>%
+    read_html() %>%
+    html_nodes(".read-more") %>%
+    html_attr("href")
+  cn_article_urls[[j]] <- cn_article_url
+}
+```
+
+```{r}
+cn_df <- data.frame()
+for(k in cn_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0(single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    cn_df <- rbind(cn_df, this_df)
+  }
+}
+```
+
+```{r}
+cn_df$link <- gsub('.{1}$', '', cn_df$link)
+cn_df <- cn_df[-8, ]
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:54){
+  current_article <- cn_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".entry-title") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes(".entry-content") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_date <- html_current_article %>%
+    html_nodes(".published") %>%
+    html_text()
+    
+  cn_df$article_title[[m]] <- print(current_title)
+  cn_df$content[[m]] <- print(current_content)
+  cn_df$published_date[[m]] <- print(current_date)
+  
+  print(m)
+}
+
+dbWriteTable(db_con, "raw_cn", cn_df, append = T)
+
+rm(cn_page)
+rm(cn_url)
+rm(cn_urls)
+rm(cn_article_url)
+rm(cn_article_urls)
+```
+
+
+# Post & Parcel website
+```{r}
+# Pages
+pap_page <- (1:1042)
+pap_urls <- list()
+
+for (i in 1:length(pap_page)){
+  pap_url <- paste0("https://postandparcel.info/page/", pap_page[i], "/?s=royal+mail")
+  pap_urls[[i]] <- pap_url
+}
+
+# Articles
+pap_article_urls <- list()
+for (j in 69:1042){
+  pap_article_url <- pap_urls[[j]] %>%
+    read_html() %>%
+    html_nodes(".et-accent-color") %>%
+    html_attr("href")
+  pap_article_urls[[j]] <- pap_article_url
+}
+```
+
+```{r}
+pap_df <- data.frame()
+for(k in pap_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0(single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    pap_df <- rbind(pap_df, this_df)
+  }
+}
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:3035){
+  current_article <- pap_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".entry-title") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes(".post-wrap") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+
+  
+  current_date <- html_current_article %>%
+    html_nodes(".updated") %>%
+    html_text()
+    
+  pap_df$article_title[[m]] <- print(current_title)
+  pap_df$content[[m]] <- print(current_content)
+  pap_df$published_date[[m]] <- print(current_date[6])
+  
+  print(m)
+}
+
+dbWriteTable(db_con, "raw_pap", pap_df, append = T)
+
+rm(pap_page)
+rm(pap_url)
+rm(pap_urls)
+rm(pap_article_url)
+rm(pap_article_urls)
+```
+
+
+# Daily Mail website
+```{r}
+# Pages
+dm_page <- seq(0, 950, by = 50)
+dm_urls <- list()
+
+for (i in 1:length(dm_page)){
+  dm_url <- paste0("https://www.dailymail.co.uk/home/search.html?offset=", dm_page[i], "&size=50&sel=site&searchPhrase=royal+mail&sort=relevant&channel=news&channel=femail&channel=moneymarkets&channel=reuters&channel=pa&channel=debate&channel=moneynews&channel=columnists&channel=money&channel=ap&type=article&days=all")
+  dm_urls[[i]] <- dm_url
+}
+
+# Articles
+dm_article_urls <- list()
+for (j in seq_along(dm_urls)){
+  dm_article_url <- dm_urls[[j]] %>%
+    read_html() %>%
+    html_nodes("h3.sch-res-title > a") %>%
+    html_attr("href")
+  dm_article_urls[[j]] <- dm_article_url
+}
+```
+
+```{r}
+dm_df <- data.frame()
+for(k in dm_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0("https://www.dailymail.co.uk", single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    dm_df <- rbind(dm_df, this_df)
+  }
+}
+```
+
+```{r}
+dm_df <- dplyr::filter(dm_df, !grepl("royal-mail", link))
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:999){
+  current_article <- dm_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes("h2") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes("font") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- paste(current_content, collapse = " ")
+  
+  current_date <- html_current_article %>%
+    html_nodes("time") %>%
+    html_text() %>%
+    stripWhitespace()
+    
+  dm_df$article_title[[m]] <- print(current_title[1])
+  dm_df$content[[m]] <- print(current_content)
+  dm_df$published_date[[m]] <- print(current_date[1])
+  
+  print(m)
+  
+}
+
+dbWriteTable(db_con, "raw_dm", dm_df, append = T)
+
+rm(dm_page)
+rm(dm_url)
+rm(dm_urls)
+rm(dm_article_url)
+rm(dm_article_urls)
+```
+
+
+# The Sun website
+```{r}
+# Pages
+sun_page <- (1:7)
+sun_urls <- list()
+
+for (i in 1:length(sun_page)){
+  sun_url <- paste0("https://www.thesun.co.uk/topic/royal-mail/page/", sun_page[i], "/")
+  sun_urls[[i]] <- sun_url
+}
+
+# Articles
+sun_article_urls <- list()
+for (j in seq_along(sun_urls)){
+  sun_article_url <- sun_urls[[j]] %>%
+    read_html() %>%
+    html_nodes(".teaser-anchor") %>%
+    html_attr("href")
+  sun_article_urls[[j]] <- sun_article_url
+}
+```
+
+```{r}
+sun_df <- data.frame()
+for(k in sun_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0(single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    sun_df <- rbind(sun_df, this_df)
+  }
+}
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:104){
+  current_article <- sun_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".article__headline") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes("p") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+
+  current_content <- current_content[-1]
+  current_content <- current_content[1:(length(current_content)-7)]
+  current_content <- paste(current_content, collapse = " ")
+  
+  current_date <- html_current_article %>%
+    html_nodes(".article__datestamp") %>%
+    html_text()
+    
+  sun_df$article_title[[m]] <- print(current_title)
+  sun_df$content[[m]] <- print(current_content)
+  sun_df$published_date[[m]] <- print(current_date[1])
+  
+  print(m)
+}
+
+dbWriteTable(db_con, "raw_sun", sun_df, append = T)
+
+rm(sun_page)
+rm(sun_url)
+rm(sun_urls)
+rm(sun_article_url)
+rm(sun_article_urls)
+```
+
+
+# Parcel and Postal Technology International website
+```{r}
+# Pages
+ppt_page <- (1:19)
+ppt_urls <- list()
+
+for (i in 1:length(ppt_page)){
+  ppt_url <- paste0("https://www.parcelandpostaltechnologyinternational.com/page/", ppt_page[i], "?s=royal+mail")
+  ppt_urls[[i]] <- ppt_url
+}
+
+# Articles
+ppt_article_urls <- list()
+for (j in seq_along(ppt_urls)){
+  ppt_article_url <- ppt_urls[[j]] %>%
+    read_html() %>%
+    html_nodes("h2.post-title > a") %>%
+    html_attr("href")
+  ppt_article_urls[[j]] <- ppt_article_url
+}
+```
+
+```{r}
+ppt_df <- data.frame()
+for(k in ppt_article_urls){
+  for(l in k){
+    single_article <- l
+    single_link <- paste0(single_article)
+    this_df <- data.frame(matrix(ncol = 2, nrow = 0))
+    this_df <- as.data.frame(cbind(single_article, single_link))
+    colnames(this_df) <- c("extension", "link")
+    this_df[] <- lapply(this_df, as.character)
+    
+    ppt_df <- rbind(ppt_df, this_df)
+  }
+}
+```
+
+```{r}
+ppt_df <- dplyr::filter(ppt_df, !grepl("in-this-issue", link))
+```
+
+```{r}
+#for (m in 1:2){
+for (m in 1:182){
+  current_article <- ppt_df$link[m]
+  html_current_article <- current_article %>%
+    read_html
+  
+  current_title <- html_current_article %>%
+    html_nodes(".fn") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- html_current_article %>%
+    html_nodes("p") %>%
+    html_text() %>%
+    tolower() %>%
+    stripWhitespace()
+  
+  current_content <- current_content[1:(length(current_content)-3)]
+  current_content <- paste(current_content, collapse = " ")
+  
+  current_date <- html_current_article %>%
+    html_nodes(".value-title") %>%
+    html_text() %>%
+    stripWhitespace()
+    
+  ppt_df$article_title[[m]] <- print(current_title)
+  ppt_df$content[[m]] <- print(current_content)
+  ppt_df$published_date[[m]] <- print(current_date)
+  
+  print(m)
+  
+}
+
+dbWriteTable(db_con, "raw_ppt", ppt_df, append = T)
+
+rm(ppt_page)
+rm(ppt_url)
+rm(ppt_urls)
+rm(ppt_article_url)
+rm(ppt_article_urls)
+```
+
+
+# Check duplicates
+```{r}
+bbc_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+cn_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+dm_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+mir_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+pap_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+ppt_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+rmg_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+
+sun_df %>%
+  group_by(content) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  filter(total > 1)
+```
