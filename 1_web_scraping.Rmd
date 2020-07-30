@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+# Load all required packages
 library(rvest)
 library(xml2)
 library(downloader)
@@ -29,12 +30,14 @@ library(lubridate)
 
 # SQL DB
 ```{r}
+# Load required packages to connect with SQL
 library(tidytext)
 library(sqldf)
 library(RSQLite)
 library(httr)
 library(textclean)
 
+# Create connection to a SQL database
 db_con <- dbConnect(SQLite(), dbname="scenario_prep.db")
 ```
 
