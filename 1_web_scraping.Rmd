@@ -81,7 +81,7 @@ for(k in rmg_article_urls){
 
 ```{r}
 #for (m in 1:2){
-for (m in 1754:1774){
+for (m in 1:1774){
   current_article <- rmg_df$link[m]
   html_current_article <- current_article %>%
     read_html
